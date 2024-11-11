@@ -82,3 +82,59 @@ python manage.py crontab remove
 
 - **Débogage** : Utilisez les fichiers de log pour capturer les messages de débogage et surveiller les exécutions des tâches cron.
 - **Permissions** : Assurez-vous que votre utilisateur a les permissions nécessaires pour ajouter et exécuter les tâches cron sur le système.
+
+
+### Détails
+
+Les tâches cron utilisent une syntaxe bien définie pour planifier des moments d'exécution. Voici les différents formats que vous pouvez utiliser :
+
+### Syntaxe Cron : 
+
+La syntaxe cron suit ce format :
+```
+* * * * * commande
+| | | | |
+| | | | └── Jour de la semaine (0 à 7) (0 ou 7 = Dimanche)
+| | | └──── Mois (1 - 12)
+| | └────── Jour du mois (1 - 31)
+| └──────── Heure (0 - 23)
+└────────── Minute (0 - 59)
+```
+
+### Exemples de Programmations Courantes
+
+| Expression Cron       | Explication                                      |
+|-----------------------|--------------------------------------------------|
+| `*/5 * * * *`         | Toutes les 5 minutes                             |
+| `0 * * * *`           | À chaque heure, à la minute 0                    |
+| `0 0 * * *`           | Une fois par jour, à minuit                      |
+| `0 12 * * *`          | Une fois par jour, à midi                        |
+| `0 0 * * 0`           | Une fois par semaine, le dimanche à minuit       |
+| `0 0 1 * *`           | Une fois par mois, le premier jour à minuit      |
+| `*/10 0 * * *`        | Toutes les 10 minutes entre minuit et 1h du matin|
+| `15 14 * * *`         | Tous les jours à 14h15                           |
+| `0 18 * * 1-5`        | En semaine (lundi à vendredi) à 18h              |
+| `0 8,16 * * *`        | Deux fois par jour, à 8h et 16h                  |
+| `*/15 9-17 * * *`     | Toutes les 15 minutes entre 9h et 17h chaque jour|
+| `0 0-5 14 * *`        | Chaque heure entre minuit et 5h le 14e jour du mois|
+
+### Exemples Avancés
+
+- **Toutes les 15 minutes, en semaine uniquement** :
+  ```cron
+  */15 * * * 1-5
+  ```
+- **Tous les dimanches à 23h30** :
+  ```cron
+  30 23 * * 0
+  ```
+- **Chaque premier du mois à 1h du matin** :
+  ```cron
+  0 1 1 * *
+  ```
+- **Tous les jours ouvrables à 8h30** :
+  ```cron
+  30 8 * * 1-5
+  ```
+  
+En utilisant ces formats, vous pouvez ajuster votre tâche cron en fonction des besoins de votre application.
