@@ -193,6 +193,29 @@ Voici un guide pour déployer une application Django avec Vue.js sur un serveur 
    }
    ```
 
+   - Exemple :
+   ```
+   server {
+       listen 8080;
+       server_name alertedgped.finances.bj;
+   
+       location / {
+           root /var/www/html/alertedgped/;
+           try_files $uri $uri/ /index.html;
+       }
+   
+   
+       location /api/ {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+
+   ```
+
 2. **Activer le site et redémarrer Nginx** :
    ```bash
    sudo ln -s /etc/nginx/sites-available/votre_projet /etc/nginx/sites-enabled
