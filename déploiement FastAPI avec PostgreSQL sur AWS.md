@@ -164,9 +164,9 @@ ORIGIN_CORS="http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,h
 EMAIL_PROVIDER=smtp
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USERNAME=oriontestorion@gmail.com
-SMTP_PASSWORD=dszoyexnxznsaxfo
-SENDER_EMAIL=oriontestorion@gmail.com
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SENDER_EMAIL=
 
 # Variables de la base de données PostgreSQL
 DB_USER=postgres
@@ -525,9 +525,9 @@ Après avoir déployé votre application FastAPI sur AWS, il est crucial de réa
      ```env
      SMTP_SERVER=smtp.gmail.com
      SMTP_PORT=587
-     SMTP_USERNAME=oriontestorion@gmail.com
-     SMTP_PASSWORD=dszoyexnxznsaxfo
-     SENDER_EMAIL=oriontestorion@gmail.com
+     SMTP_USERNAME=
+     SMTP_PASSWORD=
+     SENDER_EMAIL=
      ```
    - **Note** : Si vous utilisez Gmail, assurez-vous que les paramètres de sécurité permettent l'accès via SMTP (par exemple, activer les applications moins sécurisées ou utiliser un mot de passe d'application).
 
