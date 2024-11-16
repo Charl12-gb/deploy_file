@@ -222,65 +222,74 @@ sqlalchemy.url = postgresql+asyncpg://postgres:root@localhost:5432/cica_db
 Voici un exemple de fichier `Jenkinsfile` adapté pour déployer une application Docker sur une instance EC2 :
 
 ```groovy
-pipeline {
-    agent any
-    environment {
-        DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app' // Nom du dépôt Docker Hub
-        EC2_IP = 'your-ec2-public-ip' // Adresse IP publique de l'instance EC2
-        EC2_USER = 'ec2-user' // Utilisateur par défaut pour Amazon Linux
-        DOCKER_IMAGE_TAG = "${env.BUILD_ID}" // Identifiant unique pour chaque build
-    }
-    stages {
-        stage('Checkout Code') {
-            steps {
-                // Récupération du code source depuis GitHub
-                checkout scm
-            }
+    pipeline {
+        agent any
+        environment {
+            DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app' // Nom du dépôt Docker Hub
+            EC2_IP = 'your-ec2-public-ip' // Adresse IP publique de l'instance EC2
+            EC2_USER = 'ec2-user' // Utilisateur par défaut pour Amazon Linux
+            DOCKER_IMAGE_TAG = "${env.BUILD_ID}" // Identifiant unique pour chaque build
         }
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    // Construction de l'image Docker avec un tag unique
-                    dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}")
+        stages {
+            stage('Checkout Code') {
+                steps {
+                    // Récupération du code source depuis GitHub
+                    checkout scm
                 }
             }
-        }
-        stage('Push Docker Image') {
-            steps {
-                script {
-                    // Connexion au registre Docker Hub et push de l'image
-                    docker.withRegistry('', 'docker-hub-credentials') {
-                        dockerImage.push() // Push avec le tag BUILD_ID
-                        dockerImage.push('latest') // Tag "latest" pour déploiement récent
+            stage('Build Docker Image') {
+                steps {
+                    script {
+                        // Construction de l'image Docker avec un tag unique
+                        dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}")
+                    }
+                }
+            }
+            stage('Push Docker Image') {
+                steps {
+                    script {
+                        // Connexion manuelle à Docker Hub avec les secrets GitHub
+                        withCredentials([
+                            string(credentialsId: 'DOCKER_HUB_USERNAME', variable: 'DOCKER_USERNAME'),
+                            string(credentialsId: 'DOCKER_HUB_PASSWORD', variable: 'DOCKER_PASSWORD')
+                        ]) {
+                            // Connexion à Docker Hub
+                            sh """
+                            echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin
+                            """
+                            
+                            // Push de l'image Docker
+                            dockerImage.push() // Push avec le tag BUILD_ID
+                            dockerImage.push('latest') // Ajout d'un tag "latest" pour les déploiements récents
+                        }
+                    }
+                }
+            }
+            stage('Deploy to EC2') {
+                steps {
+                    script {
+                        // Connexion en SSH à l'instance EC2 et déploiement
+                        sshagent(['ec2-ssh-credentials']) {
+                            sh """
+                            ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} << EOF
+                            docker pull ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
+                            docker stop fastapi-container || true
+                            docker rm fastapi-container || true
+                            docker run -d --name fastapi-container -p 8000:8000 ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
+                            EOF
+                            """
+                        }
                     }
                 }
             }
         }
-        stage('Deploy to EC2') {
-            steps {
-                script {
-                    // Connexion en SSH à l'instance EC2 et déploiement
-                    sshagent(['ec2-ssh-credentials']) {
-                        sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} << EOF
-                        docker pull ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
-                        docker stop fastapi-container || true
-                        docker rm fastapi-container || true
-                        docker run -d --name fastapi-container -p 8000:8000 ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
-                        EOF
-                        """
-                    }
-                }
+        post {
+            always {
+                // Nettoyage de l'espace de travail Jenkins
+                cleanWs()
             }
         }
     }
-    post {
-        always {
-            // Nettoyage de l'espace de travail Jenkins
-            cleanWs()
-        }
-    }
-}
 ```
 
 ---
