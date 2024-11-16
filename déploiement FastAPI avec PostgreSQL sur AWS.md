@@ -197,127 +197,170 @@ sqlalchemy.url = postgresql+asyncpg://postgres:root@localhost:5432/cica_db
 ```
 
 ---
-
-### 4. Configuration de GitHub, Jenkins et AWS pour CI/CD
-
-#### **4.1 Configuration du Dépôt GitHub et Jenkins**
-
-1. **Dépôt GitHub** :  
-   - Créez un dépôt pour votre projet sur GitHub.  
-   - Poussez votre code source, y compris le fichier `Dockerfile` et le fichier `Jenkinsfile`.  
-
-2. **Configuration Jenkins** :  
-   - Installez Jenkins sur une machine (locale ou distante).  
-   - Configurez les plugins nécessaires, comme :
-     - **Docker Pipeline** (pour gérer Docker dans les pipelines).
-     - **SSH Agent** (pour les connexions SSH).  
-   - Ajoutez les credentials nécessaires :  
-     - **Docker Hub Credentials** : Identifiants pour se connecter à Docker Hub.  
-     - **SSH Credentials** : Clé privée utilisée pour se connecter à l'instance EC2.  
+Voici une version corrigée et complétée de votre documentation, avec l'ajout de la section Kubernetes après Jenkins.
 
 ---
 
-#### **4.2 Fichier Jenkinsfile**
+# 4. Configuration de GitHub, Jenkins, AWS, et Kubernetes pour CI/CD
 
-Voici un exemple de fichier `Jenkinsfile` adapté pour déployer une application Docker sur une instance EC2 :
+## 4.1 Configuration du Dépôt GitHub et Jenkins
+
+### **Dépôt GitHub**  
+1. Créez un dépôt GitHub pour héberger le code source de votre projet.  
+2. Poussez le code source dans ce dépôt, en incluant les fichiers essentiels :  
+   - **Dockerfile** : pour construire l'image Docker.  
+   - **Jenkinsfile** : pour automatiser le pipeline CI/CD avec Jenkins.
+
+---
+
+### **Configuration de Jenkins**  
+1. **Installation de Jenkins** :  
+   Installez Jenkins sur une machine locale ou un serveur distant.  
+2. **Installation des plugins nécessaires** :  
+   - Docker Pipeline : pour gérer Docker dans les pipelines Jenkins.  
+   - SSH Agent : pour établir des connexions SSH sécurisées.  
+3. **Ajout des credentials dans Jenkins** :  
+   - **Docker Hub Credentials** : Ajoutez les identifiants pour votre compte Docker Hub (nom d'utilisateur et mot de passe).  
+   - **SSH Credentials** : Ajoutez une clé privée pour établir une connexion SSH avec l'instance EC2.
+
+---
+
+## 4.2 Exemple de Fichier Jenkinsfile
+
+Voici un exemple de fichier Jenkinsfile configuré pour construire, pousser une image Docker et déployer une application sur une instance EC2.
 
 ```groovy
-    pipeline {
-        agent any
-        environment {
-            DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app' // Nom du dépôt Docker Hub
-            EC2_IP = 'your-ec2-public-ip' // Adresse IP publique de l'instance EC2
-            EC2_USER = 'ec2-user' // Utilisateur par défaut pour Amazon Linux
-            DOCKER_IMAGE_TAG = "${env.BUILD_ID}" // Identifiant unique pour chaque build
+pipeline {
+    agent any
+    environment {
+        DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app' // Nom du dépôt Docker Hub
+        EC2_IP = 'your-ec2-public-ip' // Adresse IP publique de l'instance EC2
+        EC2_USER = 'ec2-user' // Utilisateur par défaut pour Amazon Linux
+        DOCKER_IMAGE_TAG = "${env.BUILD_ID}" // Identifiant unique pour chaque build
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm // Récupération du code source depuis GitHub
+            }
         }
-        stages {
-            stage('Checkout Code') {
-                steps {
-                    // Récupération du code source depuis GitHub
-                    checkout scm
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}")
                 }
             }
-            stage('Build Docker Image') {
-                steps {
-                    script {
-                        // Construction de l'image Docker avec un tag unique
-                        dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}")
-                    }
-                }
-            }
-            stage('Push Docker Image') {
-                steps {
-                    script {
-                        // Connexion manuelle à Docker Hub avec les secrets GitHub
-                        withCredentials([
-                            string(credentialsId: 'DOCKER_HUB_USERNAME', variable: 'DOCKER_USERNAME'),
-                            string(credentialsId: 'DOCKER_HUB_PASSWORD', variable: 'DOCKER_PASSWORD')
-                        ]) {
-                            // Connexion à Docker Hub
-                            sh """
-                            echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin
-                            """
-                            
-                            // Push de l'image Docker
-                            dockerImage.push() // Push avec le tag BUILD_ID
-                            dockerImage.push('latest') // Ajout d'un tag "latest" pour les déploiements récents
-                        }
-                    }
-                }
-            }
-            stage('Deploy to EC2') {
-                steps {
-                    script {
-                        // Connexion en SSH à l'instance EC2 et déploiement
-                        sshagent(['ec2-ssh-credentials']) {
-                            sh """
-                            ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} << EOF
-                            docker pull ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
-                            docker stop fastapi-container || true
-                            docker rm fastapi-container || true
-                            docker run -d --name fastapi-container -p 8000:8000 ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
-                            EOF
-                            """
-                        }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'DOCKER_HUB_USERNAME', variable: 'DOCKER_USERNAME'),
+                        string(credentialsId: 'DOCKER_HUB_PASSWORD', variable: 'DOCKER_PASSWORD')
+                    ]) {
+                        sh "echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin"
+                        dockerImage.push()
                     }
                 }
             }
         }
-        post {
-            always {
-                // Nettoyage de l'espace de travail Jenkins
-                cleanWs()
+        stage('Deploy to EC2') {
+            steps {
+                script {
+                    sshagent(['SSH_CREDENTIALS_ID']) {
+                        sh """
+                        ssh ${EC2_USER}@${EC2_IP} "
+                            docker pull ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG} &&
+                            docker stop app || true &&
+                            docker rm app || true &&
+                            docker run -d --name app -p 80:80 ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
+                        "
+                        """
+                    }
+                }
             }
         }
     }
+}
 ```
 
 ---
 
-#### **4.3 Étapes de Configuration Supplémentaires**
+## 4.3 Ajout de Kubernetes dans le Processus CI/CD
 
-1. **Configuration SSH pour l'Instance EC2** :  
-   - Ajoutez la clé privée SSH utilisée pour accéder à l’instance dans **Jenkins > Manage Credentials**.
-   - Donnez un identifiant à ces credentials, comme `ec2-ssh-credentials`.  
-
-2. **Ouverture des Ports dans le Groupe de Sécurité EC2** :  
-   - **Port 8000** : Autorisez l'accès public ou restreint pour accéder à l'application FastAPI.  
-   - **Port 22 (SSH)** : Assurez-vous que Jenkins peut se connecter via SSH à l'instance EC2.
-
-3. **Connexion Docker Hub** :  
-   - Configurez les credentials Docker Hub dans **Jenkins > Manage Credentials**.  
-   - Donnez un identifiant à ces credentials, comme `docker-hub-credentials`.  
+### **Pourquoi Kubernetes ?**  
+Kubernetes permet d'orchestrer le déploiement, la mise à l'échelle, et la gestion des conteneurs Docker. En l'intégrant à notre pipeline CI/CD, nous assurons une gestion optimale des déploiements dans des environnements complexes.
 
 ---
 
-#### **Résumé**
+### **Étapes pour intégrer Kubernetes**
 
-Ce pipeline Jenkins vous permet de :  
-- Construire une image Docker avec votre application FastAPI.  
-- Publier cette image sur Docker Hub.  
-- Déployer automatiquement l'application sur une instance EC2 via SSH.  
+1. **Configurer un Cluster Kubernetes** :
+   - Utilisez **Amazon EKS** (Elastic Kubernetes Service) ou un autre service cloud pour créer un cluster Kubernetes.
+   - Configurez `kubectl` localement en téléchargeant le fichier de configuration du cluster.
 
-En cas de modification du code source dans GitHub, le pipeline peut être déclenché automatiquement pour redéployer l'application.
+2. **Créer des Manifests Kubernetes** :
+   - Créez les fichiers YAML pour déployer l'application, comme décrit ci-dessous :
+     - **Deployment.yaml** :
+       ```yaml
+       apiVersion: apps/v1
+       kind: Deployment
+       metadata:
+         name: fastapi-app
+       spec:
+         replicas: 3
+         selector:
+           matchLabels:
+             app: fastapi-app
+         template:
+           metadata:
+             labels:
+               app: fastapi-app
+           spec:
+             containers:
+             - name: fastapi-app
+               image: votre_nom_utilisateur/fastapi-aws-app:${DOCKER_IMAGE_TAG}
+               ports:
+               - containerPort: 80
+       ```
+     - **Service.yaml** :
+       ```yaml
+       apiVersion: v1
+       kind: Service
+       metadata:
+         name: fastapi-service
+       spec:
+         type: LoadBalancer
+         selector:
+           app: fastapi-app
+         ports:
+         - protocol: TCP
+           port: 80
+           targetPort: 80
+       ```
+
+3. **Modifier le Jenkinsfile pour inclure Kubernetes** :  
+   Ajoutez un nouveau stage pour déployer l'application sur Kubernetes après avoir poussé l'image Docker.
+
+```groovy
+stage('Deploy to Kubernetes') {
+    steps {
+        script {
+            sh """
+            kubectl apply -f Deployment.yaml
+            kubectl apply -f Service.yaml
+            """
+        }
+    }
+}
+```
+
+4. **Vérification du Déploiement** :
+   - Une fois le pipeline exécuté, utilisez `kubectl get pods` et `kubectl get services` pour vérifier que l'application est déployée et accessible.
+
+---
+
+Avec cette configuration, vous avez un pipeline CI/CD complet utilisant Jenkins pour automatiser la construction et le déploiement des conteneurs Docker, et Kubernetes pour orchestrer les déploiements dans un environnement scalable.
 
 ---
 
