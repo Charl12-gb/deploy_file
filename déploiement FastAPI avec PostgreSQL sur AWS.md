@@ -200,55 +200,115 @@ sqlalchemy.url = postgresql+asyncpg://postgres:root@localhost:5432/cica_db
 
 ### 4. Configuration de GitHub, Jenkins et AWS pour CI/CD
 
-#### 4.1 Dépôt GitHub et Jenkins
+#### **4.1 Configuration du Dépôt GitHub et Jenkins**
 
-1. **Dépôt GitHub** : Créez un dépôt pour votre projet et poussez-y votre code.
-2. **Jenkins** : Configurez un pipeline dans Jenkins pour automatiser le processus de CI/CD.
+1. **Dépôt GitHub** :  
+   - Créez un dépôt pour votre projet sur GitHub.  
+   - Poussez votre code source, y compris le fichier `Dockerfile` et le fichier `Jenkinsfile`.  
 
-#### 4.2 Jenkinsfile
+2. **Configuration Jenkins** :  
+   - Installez Jenkins sur une machine (locale ou distante).  
+   - Configurez les plugins nécessaires, comme :
+     - **Docker Pipeline** (pour gérer Docker dans les pipelines).
+     - **SSH Agent** (pour les connexions SSH).  
+   - Ajoutez les credentials nécessaires :  
+     - **Docker Hub Credentials** : Identifiants pour se connecter à Docker Hub.  
+     - **SSH Credentials** : Clé privée utilisée pour se connecter à l'instance EC2.  
 
-Voici un exemple de fichier `Jenkinsfile` pour automatiser la construction et le déploiement avec Jenkins et Docker.
+---
+
+#### **4.2 Fichier Jenkinsfile**
+
+Voici un exemple de fichier `Jenkinsfile` adapté pour déployer une application Docker sur une instance EC2 :
 
 ```groovy
 pipeline {
     agent any
     environment {
-        DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app'
-        AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
-        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        DOCKER_HUB_REPO = 'votre_nom_utilisateur/fastapi-aws-app' // Nom du dépôt Docker Hub
+        EC2_IP = 'your-ec2-public-ip' // Adresse IP publique de l'instance EC2
+        EC2_USER = 'ec2-user' // Utilisateur par défaut pour Amazon Linux
+        DOCKER_IMAGE_TAG = "${env.BUILD_ID}" // Identifiant unique pour chaque build
     }
     stages {
+        stage('Checkout Code') {
+            steps {
+                // Récupération du code source depuis GitHub
+                checkout scm
+            }
+        }
         stage('Build Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build("${DOCKER_HUB_REPO}:${env.BUILD_ID}")
+                    // Construction de l'image Docker avec un tag unique
+                    dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}")
                 }
             }
         }
         stage('Push Docker Image') {
             steps {
                 script {
+                    // Connexion au registre Docker Hub et push de l'image
                     docker.withRegistry('', 'docker-hub-credentials') {
-                        dockerImage.push()
+                        dockerImage.push() // Push avec le tag BUILD_ID
+                        dockerImage.push('latest') // Tag "latest" pour déploiement récent
                     }
                 }
             }
         }
-        stage('Deploy to AWS') {
+        stage('Deploy to EC2') {
             steps {
-                sh 'aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment'
+                script {
+                    // Connexion en SSH à l'instance EC2 et déploiement
+                    sshagent(['ec2-ssh-credentials']) {
+                        sh """
+                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} << EOF
+                        docker pull ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
+                        docker stop fastapi-container || true
+                        docker rm fastapi-container || true
+                        docker run -d --name fastapi-container -p 8000:8000 ${DOCKER_HUB_REPO}:${DOCKER_IMAGE_TAG}
+                        EOF
+                        """
+                    }
+                }
             }
         }
     }
     post {
         always {
+            // Nettoyage de l'espace de travail Jenkins
             cleanWs()
         }
     }
 }
 ```
 
-Voici des instructions détaillées pour configurer et déployer votre application FastAPI sur AWS en utilisant Amazon RDS pour PostgreSQL et Amazon ECS pour héberger votre application Docker.
+---
+
+#### **4.3 Étapes de Configuration Supplémentaires**
+
+1. **Configuration SSH pour l'Instance EC2** :  
+   - Ajoutez la clé privée SSH utilisée pour accéder à l’instance dans **Jenkins > Manage Credentials**.
+   - Donnez un identifiant à ces credentials, comme `ec2-ssh-credentials`.  
+
+2. **Ouverture des Ports dans le Groupe de Sécurité EC2** :  
+   - **Port 8000** : Autorisez l'accès public ou restreint pour accéder à l'application FastAPI.  
+   - **Port 22 (SSH)** : Assurez-vous que Jenkins peut se connecter via SSH à l'instance EC2.
+
+3. **Connexion Docker Hub** :  
+   - Configurez les credentials Docker Hub dans **Jenkins > Manage Credentials**.  
+   - Donnez un identifiant à ces credentials, comme `docker-hub-credentials`.  
+
+---
+
+#### **Résumé**
+
+Ce pipeline Jenkins vous permet de :  
+- Construire une image Docker avec votre application FastAPI.  
+- Publier cette image sur Docker Hub.  
+- Déployer automatiquement l'application sur une instance EC2 via SSH.  
+
+En cas de modification du code source dans GitHub, le pipeline peut être déclenché automatiquement pour redéployer l'application.
 
 ---
 
@@ -270,7 +330,6 @@ Voici des instructions détaillées pour configurer et déployer votre applicati
 
 6. **Paramètres de l’instance** :
    - Choisissez un nom pour votre instance, comme `fastapi-postgres-db`.
-   - Choisissez une classe d’instance adaptée aux besoins de votre application (par exemple, `db.t3.micro` pour une petite application).
 
 7. **Authentification** :
    - Définissez le nom d'utilisateur principal (ex. `postgres`) et un mot de passe sécurisé pour l'instance RDS.
@@ -295,28 +354,82 @@ Voici des instructions détaillées pour configurer et déployer votre applicati
 
 ---
 
-#### 2. Configurer Amazon ECS pour héberger l’application Docker
+### 2. Configurer Amazon ECS et EC2 pour héberger l'application Docker
 
-1. **Accédez à Amazon ECS** dans la console AWS.
+1. **Créer une Instance EC2** :  
+   - Accédez à la console AWS EC2 et cliquez sur **Lancer une Instance**.  
+   - **Nom de l'Instance** : Donnez un nom descriptif à votre instance, comme `fastapi-ec2-instance`.  
+   - **Choix de l’Image AMI** : Sélectionnez **Amazon Linux 2 AMI** (gratuitement éligible au niveau gratuit AWS).  
+   - **Type d’Instance** : Choisissez un type adapté à votre charge, comme `t2.micro` pour des tests légers.  
+   - **Configuration des Clés SSH** :
+     - **Option 1 (avec paire de clés)** : Si vous avez une paire de clés SSH existante, sélectionnez-la. Sinon, créez-en une nouvelle pour vous connecter via SSH.
+     - **Option 2 (sans paire de clés)** : Si vous continuez sans paire de clés, assurez-vous que votre instance est accessible par d'autres moyens.  
+   - **Créer un Groupe de Sécurité** : 
+     - **SSH (port 22)** : Autorisez uniquement votre adresse IP locale ou une plage sécurisée.  
+     - **HTTP (port 80)** et/ou **HTTPS (port 443)** : Si l'application doit être accessible publiquement.  
+     - **Custom TCP Rule (port 8000)** : Pour accéder directement à FastAPI si elle n'est pas déployée derrière un serveur proxy.  
+   - Cliquez sur **Lancer l'Instance**.  
 
-2. **Créer un Cluster** :
-   - Cliquez sur **Clusters** dans le menu latéral, puis sur **Create Cluster**.
-   - Sélectionnez **EC2 Linux + Networking** pour un déploiement géré, ou **Fargate** pour un service entièrement managé sans serveur.
-   - Suivez les étapes de configuration, puis cliquez sur **Create** pour finaliser.
+   Une fois l’instance lancée, notez son **ID**, son **Nom**, et son **Adresse IP publique**.
 
-3. **Configurer une Tâche ECS** (Task Definition) :
-   - Accédez à **Task Definitions** et cliquez sur **Create New Task Definition**.
-   - Choisissez **Fargate** ou **EC2** selon votre choix lors de la création du cluster.
-   
-4. **Configuration de la tâche** :
-   - **Nom** : Donnez un nom significatif, comme `fastapi-task`.
-   - **Roles IAM** : Attribuez un rôle IAM permettant à votre tâche d'accéder aux services nécessaires (comme RDS). Si vous n’avez pas de rôle IAM existant, créez-en un avec les autorisations `AmazonECSTaskExecutionRolePolicy` et `AmazonRDSFullAccess`.
-   - **Conteneurs** :
-     - Cliquez sur **Add container** pour configurer votre conteneur.
-     - **Nom du conteneur** : `fastapi-app`.
-     - **Image** : Saisissez le nom de l'image Docker (par exemple, `votre_nom_utilisateur/fastapi-aws-app:latest` depuis Docker Hub, ou l'URI ECR si vous utilisez Amazon ECR).
-     - **Port mappings** : Configurez le port 8000 pour l'exposer aux autres services.
-     - **Variables d'environnement** : Ajoutez vos variables d'environnement nécessaires (comme `DATABASE_URL`, `SECRET_KEY`, etc.), correspondant à celles de votre `.env`.
+---
+
+2. **Créer un Cluster ECS** :  
+   - Accédez à la console AWS ECS.  
+   - Cliquez sur **Clusters** > **Créer un Cluster**.  
+   - Choisissez **EC2 Linux + Networking** (compatible avec votre instance EC2).  
+   - **Configuration du Cluster** : 
+     - **Nom** : Donnez un nom, comme `fastapi-ec2-cluster`.  
+     - Configurez le type d'instance et le stockage selon vos besoins, puis cliquez sur **Créer**.  
+
+---
+
+3. **Créer une Définition de Tâche ECS** :  
+   - Accédez à **Task Definitions** > **Créer une Nouvelle Tâche**.  
+   - Sélectionnez **EC2** comme mode d’exécution.  
+   - **Configuration de la Définition** :  
+     - **Nom** : `fastapi-task`.  
+     - **Roles IAM** : Attribuez un rôle avec les permissions suivantes :  
+       - **`AmazonECSTaskExecutionRolePolicy`** (exécution des tâches ECS).  
+       - **`AmazonRDSFullAccess`** (accès à la base de données RDS, si utilisé).  
+       - Si vous n'avez pas de rôle existant, créez-en un via **IAM > Roles > Create Role**.  
+
+   - **Ajouter un Conteneur** :  
+     - Cliquez sur **Add Container** :  
+       - **Nom du Conteneur** : `fastapi-app`.  
+       - **Image** : Entrez l’image Docker que vous avez pushée, par exemple :  
+         ```
+         gboyou12/fastapi-aws-app:latest
+         ```
+       - **Port Mappings** : Configurez le port `8000` (ou selon les spécifications de votre application).  
+       - **Variables d'Environnement** : Ajoutez les variables essentielles (`DATABASE_URL`, `SECRET_KEY`, etc.). Exemple :  
+         ```
+         DATABASE_URL=postgresql://user:password@rds-instance:5432/dbname  
+         SECRET_KEY=your_secret_key  
+         ```
+       - Cliquez sur **Save** pour valider.  
+
+---
+
+4. **Déployer la Tâche ECS** :  
+   - Retournez dans votre **Cluster ECS**.  
+   - Cliquez sur l’onglet **Tasks**, puis sur **Run New Task**.  
+   - Sélectionnez la définition de tâche créée (`fastapi-task`).  
+   - Assurez-vous d’utiliser le bon réseau (VPC et sous-réseaux associés à votre instance EC2).  
+   - Cliquez sur **Run Task**.  
+
+---
+
+5. **Accéder à l’Application** :  
+   - **Vérifiez l’état de votre tâche** dans l’onglet **Tasks** du cluster ECS pour vous assurer qu'elle est bien en cours d’exécution.  
+   - Allez dans la console EC2, sélectionnez votre instance, et copiez son **IP Publique** ou **Nom DNS**.  
+   - Testez l’application FastAPI via le navigateur ou un outil comme `curl` :  
+     ```
+     http://<EC2-PUBLIC-IP>:8000/docs
+     ```
+     Remplacez `<EC2-PUBLIC-IP>` par l’adresse publique ou le DNS de votre instance.
+
+---
 
 5. **Déploiement de la tâche** :
    - Une fois la définition de la tâche créée, accédez à votre **Cluster ECS**.
